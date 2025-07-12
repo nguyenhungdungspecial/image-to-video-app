@@ -21,7 +21,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// ✅ Route tạo video — phải có
+// ✅ Route tạo video
 app.post('/create-video', upload.array('images'), async (req, res) => {
   const files = req.files;
   const description = req.body.description || '';
@@ -30,10 +30,11 @@ app.post('/create-video', upload.array('images'), async (req, res) => {
     return res.status(400).json({ error: 'Không có ảnh nào được tải lên.' });
   }
 
-  const outputPath = `uploads/output_${Date.now()}.mp4`;
+  const timestamp = Date.now();
+  const outputPath = `uploads/output_${timestamp}.mp4`;
 
-  // Giả sử bạn có lệnh ffmpeg tạo video ở đây
-  const cmd = `ffmpeg -framerate 1 -i uploads/%*.jpg -c:v libx264 -r 30 -pix_fmt yuv420p ${outputPath}`;
+  // Dùng ffmpeg với pattern glob để nối ảnh thành video
+  const cmd = `ffmpeg -pattern_type glob -framerate 1 -i "uploads/*.jpg" -c:v libx264 -r 30 -pix_fmt yuv420p ${outputPath}`;
 
   exec(cmd, (error) => {
     if (error) {
