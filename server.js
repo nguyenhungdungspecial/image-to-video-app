@@ -13,21 +13,21 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Tạo thư mục uploads nếu chưa có
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir);
 }
 
-// Cấu hình lưu ảnh với multer
+// Cấu hình multer để lưu ảnh
 const storage = multer.diskStorage({
-  destination: 'uploads/',
+  destination: uploadsDir,
   filename: (req, file, cb) => {
     cb(null, `${Date.now()}-${file.originalname}`);
   },
 });
 const upload = multer({ storage });
 
-// ✅ Route tạo video
+// ✅ Route tạo video từ danh sách ảnh cụ thể
 app.post('/create-video', upload.array('images'), async (req, res) => {
   const files = req.files;
   const description = req.body.description || '';
@@ -37,32 +37,31 @@ app.post('/create-video', upload.array('images'), async (req, res) => {
   }
 
   const timestamp = Date.now();
-  const listPathFile = `uploads/list_${timestamp}.txt`;
-  const outputPath = `uploads/output_${timestamp}.mp4`;
+  const outputPath = path.join(uploadsDir, `output_${timestamp}.mp4`);
+  const listPath = path.join(uploadsDir, `list_${timestamp}.txt`);
 
-  // Tạo file danh sách ảnh cho ffmpeg
-  const fileList = files.map(file => `file '${path.resolve(file.path)}'`).join('\n');
-  fs.writeFileSync(listPathFile, fileList);
+  // Ghi danh sách ảnh vào file text
+  const imageList = files.map(file => `file '${path.resolve(file.path)}'`).join('\n');
+  fs.writeFileSync(listPath, imageList);
 
-  // Lệnh ffmpeg sử dụng danh sách file
-  const cmd = `ffmpeg -f concat -safe 0 -i ${listPathFile} -vsync vfr -pix_fmt yuv420p -r 1 ${outputPath}`;
+  // FFmpeg tạo video từ danh sách ảnh
+  const cmd = `ffmpeg -f concat -safe 0 -i "${listPath}" -vsync vfr -pix_fmt yuv420p "${outputPath}"`;
 
-  exec(cmd, (error) => {
+  exec(cmd, (error, stdout, stderr) => {
     if (error) {
       console.error('❌ FFmpeg error:', error);
       return res.status(500).json({ error: 'Không thể tạo video.' });
     }
 
-    return res.json({
-      videoUrl: `https://${req.headers.host}/${outputPath}`,
-    });
+    const videoUrl = `https://${req.headers.host}/uploads/${path.basename(outputPath)}`;
+    return res.json({ videoUrl });
   });
 });
 
-// ✅ Cho phép truy cập thư mục uploads để tải video
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Cho phép truy cập video
+app.use('/uploads', express.static(uploadsDir));
 
 // ✅ Khởi động server
 app.listen(port, () => {
-  console.log(`✅ Server is running on port ${port}`);
+  console.log(`✅ Server đang chạy tại cổng ${port}`);
 });
