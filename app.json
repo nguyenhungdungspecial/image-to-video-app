@@ -13,21 +13,24 @@
     "updates": {
       "fallbackToCacheTimeout": 0
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "n",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
-      "permissions": ["INTERNET"],
+      "permissions": [
+        "INTERNET"
+      ],
       "package": "com.nguyenhungdunggithub.imagetovideo"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    },
-    "extra": {
-      "eas": {
-        "projectId": "ccc371f2-b6b4-4b83-accd-xxxxxxxxxxxx"
-      }
     },
     "plugins": [
       "expo-font",
@@ -36,6 +39,12 @@
     "experimental": {
       "router": true
     },
-    "owner": "nguyenhungdunggithub"
+    "owner": "nguyenhungdunggithub",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ccc371f2-b6b4-4b83-ac5b-4815dd0acf58"
+      }
+    }
   }
 }
