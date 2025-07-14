@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
-  Button,
   TextInput,
+  Button,
   Image,
   ScrollView,
-  ActivityIndicator,
   Alert,
+  ActivityIndicator,
+  StyleSheet,
+  TouchableOpacity,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
@@ -34,7 +36,7 @@ export default function HomeScreen() {
 
   const createVideo = async () => {
     if (images.length === 0) {
-      Alert.alert('⚠️ Lỗi', 'Vui lòng chọn ít nhất một hình ảnh.');
+      Alert.alert('Vui lòng chọn ít nhất một hình ảnh.');
       return;
     }
 
@@ -53,9 +55,12 @@ export default function HomeScreen() {
 
     formData.append('description', description);
 
-    try {
-      Alert.alert('🔄 Đang gửi yêu cầu', 'Đang tạo video...');
+    // ✅ Log thông tin trước khi gửi
+    console.log('🟡 Sending request to server...');
+    console.log('🖼️ Images:', images);
+    console.log('📝 Description:', description);
 
+    try {
       const response = await axios.post(
         'https://image-to-video-server-a5ci.onrender.com/create-video',
         formData,
@@ -66,14 +71,17 @@ export default function HomeScreen() {
         }
       );
 
-      Alert.alert('✅ Thành công', `Video: ${response.data.videoUrl}`);
+      console.log('✅ Response:', response.data);
+
       setVideoUri(response.data.videoUrl);
+      Alert.alert('Thành công', 'Video đã được tạo!');
     } catch (error: any) {
-      console.error('❌ Lỗi tạo video:', error);
-      Alert.alert(
-        '❌ Lỗi',
-        `Gửi request thất bại: ${error?.message || 'Không rõ lỗi'}`
-      );
+      console.error('❌ Lỗi tạo video:', {
+        message: error?.message,
+        response: error?.response?.data,
+        full: error?.toJSON?.() || error,
+      });
+      Alert.alert('Lỗi', error?.message || 'Lỗi không xác định');
     } finally {
       setLoading(false);
     }
@@ -84,63 +92,111 @@ export default function HomeScreen() {
 
     const { status } = await MediaLibrary.requestPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('⚠️ Lỗi', 'Không có quyền lưu video.');
+      Alert.alert('Không có quyền lưu video');
       return;
     }
 
-    try {
-      const asset = await MediaLibrary.createAssetAsync(videoUri);
-      await MediaLibrary.createAlbumAsync('Download', asset, false);
-      Alert.alert('✅ Thành công', 'Video đã được lưu vào máy.');
-    } catch (error: any) {
-      Alert.alert('❌ Lỗi', `Không thể lưu video: ${error.message}`);
-    }
+    const asset = await MediaLibrary.createAssetAsync(videoUri);
+    await MediaLibrary.createAlbumAsync('Videos', asset, false);
+    Alert.alert('Đã lưu video vào thư viện!');
   };
 
   return (
-    <ScrollView contentContainerStyle={{ padding: 20 }}>
-      <Button title="📷 Chọn ảnh" onPress={pickImages} />
+    <ScrollView contentContainerStyle={styles.container}>
+      <TouchableOpacity style={styles.button} onPress={pickImages}>
+        <Text style={styles.buttonText}>📸 CHỌN ẢNH</Text>
+      </TouchableOpacity>
+
       <TextInput
-        placeholder="Nhập mô tả"
+        style={styles.input}
+        placeholder="Nhập mô tả..."
         value={description}
         onChangeText={setDescription}
-        style={{
-          borderColor: '#ccc',
-          borderWidth: 1,
-          padding: 10,
-          marginTop: 10,
-        }}
       />
-      <Button
-        title="🎬 Tạo video"
-        onPress={createVideo}
-        disabled={loading}
-        color="green"
-      />
-      {loading && <ActivityIndicator size="large" color="blue" />}
 
-      {videoUri ? (
+      <TouchableOpacity style={styles.buttonGreen} onPress={createVideo}>
+        <Text style={styles.buttonText}>🎬 TẠO VIDEO</Text>
+      </TouchableOpacity>
+
+      {loading && <ActivityIndicator size="large" color="#0000ff" />}
+
+      {images.length > 0 && (
+        <View style={styles.preview}>
+          {images.map((uri, index) => (
+            <Image key={index} source={{ uri }} style={styles.image} />
+          ))}
+        </View>
+      )}
+
+      {videoUri !== '' && (
         <>
-          <Text style={{ marginTop: 20 }}>🎞 Xem video:</Text>
           <Video
             source={{ uri: videoUri }}
-            useNativeControls
+            rate={1.0}
+            volume={1.0}
+            isMuted={false}
             resizeMode="contain"
-            style={{ width: '100%', height: 200 }}
+            shouldPlay
+            useNativeControls
+            style={styles.video}
           />
-          <Button title="💾 Lưu video" onPress={saveVideo} />
+          <Button title="💾 Lưu video vào máy" onPress={saveVideo} />
         </>
-      ) : null}
-
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 20 }}>
-        {images.map((uri, index) => (
-          <Image
-            key={index}
-            source={{ uri }}
-            style={{ width: 100, height: 100, marginRight: 10, marginBottom: 10 }}
-          />
-        ))}
-      </View>
+      )}
     </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    padding: 20,
+    paddingTop: 50,
+    alignItems: 'center',
+  },
+  button: {
+    backgroundColor: '#007bff',
+    padding: 12,
+    borderRadius: 10,
+    marginVertical: 10,
+    width: '100%',
+  },
+  buttonGreen: {
+    backgroundColor: '#28a745',
+    padding: 12,
+    borderRadius: 10,
+    marginVertical: 10,
+    width: '100%',
+  },
+  buttonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    textAlign: 'center',
+    fontSize: 16,
+  },
+  input: {
+    borderColor: '#ccc',
+    borderWidth: 1,
+    width: '100%',
+    padding: 10,
+    borderRadius: 10,
+    marginVertical: 10,
+    backgroundColor: 'white',
+  },
+  preview: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 10,
+  },
+  image: {
+    width: 100,
+    height: 100,
+    margin: 5,
+    borderRadius: 8,
+  },
+  video: {
+    width: '100%',
+    height: 200,
+    marginTop: 20,
+    borderRadius: 8,
+  },
+});
