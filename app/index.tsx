@@ -1,147 +1,260 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
+  StyleSheet,
   View,
   Text,
-  TextInput,
   Button,
   Image,
+  Dimensions,
+  TextInput,
   ScrollView,
-  Alert,
-  ActivityIndicator,
-  StyleSheet,
   TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { Video } from 'expo-av'; // Dùng expo-av cho Video
+import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
-import axios from 'axios';
-import { Video } from 'expo-av';
+import Slider from '@react-native-community/slider'; // Thanh trượt thời gian
 
-export default function HomeScreen() {
-  const [images, setImages] = useState<string[]>([]);
+// LƯU Ý QUAN TRỌNG: Thay thế URL này bằng URL Render của server của bạn
+const SERVER_URL = 'https://image-to-video-server-a5ci.onrender.com';
+
+const { width } = Dimensions.get('window');
+const VIDEO_FRAME_WIDTH = width * 0.95; // Chiếm 95% chiều ngang màn hình
+const VIDEO_FRAME_HEIGHT = VIDEO_FRAME_WIDTH * 0.7; // Chiều cao bằng 70% chiều ngang
+
+export default function App() {
+  const [selectedImages, setSelectedImages] = useState([]);
   const [description, setDescription] = useState('');
-  const [videoUri, setVideoUri] = useState('');
+  const [videoUrl, setVideoUrl] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [videoProgress, setVideoProgress] = useState(0);
+  const [isSaving, setIsSaving] = useState(false);
+  const videoRef = useRef(null);
+
+  // Yêu cầu quyền truy cập thư viện ảnh/video khi ứng dụng khởi động
+  useEffect(() => {
+    (async () => {
+      if (Platform.OS !== 'web') {
+        const { status } = await MediaLibrary.requestPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Cần quyền truy cập', 'Ứng dụng cần quyền truy cập vào thư viện ảnh để lưu video.');
+        }
+      }
+    })();
+  }, []);
 
   const pickImages = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsMultipleSelection: true,
+    setVideoUrl(null); // Reset video khi chọn ảnh mới
+    setSelectedImages([]); // Xóa ảnh cũ
+    let result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: true, // Cho phép chọn nhiều ảnh
+      quality: 1,
     });
 
     if (!result.canceled) {
-      const uris = result.assets.map((asset) => asset.uri);
-      setImages(uris);
+      // Lấy URI từ mảng assets
+      const uris = result.assets.map(asset => asset.uri);
+      setSelectedImages(uris);
     }
   };
 
   const createVideo = async () => {
-    if (images.length === 0) {
-      Alert.alert('Vui lòng chọn ít nhất một hình ảnh.');
+    if (selectedImages.length === 0) {
+      Alert.alert('Lỗi', 'Vui lòng chọn ít nhất một ảnh để tạo video.');
       return;
     }
 
     setLoading(true);
+    setVideoUrl(null); // Reset video URL trước khi tạo mới
+
     const formData = new FormData();
-
-    images.forEach((uri, index) => {
-      const filename = uri.split('/').pop() || `image_${index}.jpg`;
-      const type = 'image/jpeg';
-      formData.append('images', {
-        uri,
-        name: filename,
-        type,
-      } as any);
+    selectedImages.forEach((uri, index) => {
+      const filename = uri.split('/').pop();
+      const match = /\.(\w+)$/.exec(filename);
+      const type = match ? `image/${match[1]}` : `image`;
+      formData.append('images', { uri, name: filename, type });
     });
-
     formData.append('description', description);
 
-    // ✅ Log thông tin trước khi gửi
-    console.log('🟡 Sending request to server...');
-    console.log('🖼️ Images:', images);
-    console.log('📝 Description:', description);
-
     try {
-      const response = await axios.post(
-        'https://image-to-video-server-a5ci.onrender.com/create-video',
-        formData,
-        {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        }
-      );
-
-      console.log('✅ Response:', response.data);
-
-      setVideoUri(response.data.videoUrl);
-      Alert.alert('Thành công', 'Video đã được tạo!');
-    } catch (error: any) {
-      console.error('❌ Lỗi tạo video:', {
-        message: error?.message,
-        response: error?.response?.data,
-        full: error?.toJSON?.() || error,
+      const response = await fetch(`${SERVER_URL}/create-video`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Content-Type': 'multipart/form-data', // Quan trọng cho FormData
+        },
       });
-      Alert.alert('Lỗi', error?.message || 'Lỗi không xác định');
+
+      const data = await response.json();
+
+      if (response.ok) {
+        Alert.alert('Thành công', 'Video đã được tạo!');
+        console.log('Video URL:', data.videoUrl);
+        setVideoUrl(data.videoUrl);
+      } else {
+        Alert.alert('Lỗi', data.error || 'Không thể tạo video.');
+      }
+    } catch (error) {
+      console.error('Lỗi khi gửi yêu cầu tạo video:', error);
+      Alert.alert('Lỗi', 'Đã xảy ra lỗi mạng hoặc lỗi server.');
     } finally {
       setLoading(false);
     }
   };
 
-  const saveVideo = async () => {
-    if (!videoUri) return;
+  const togglePlayPause = () => {
+    if (videoRef.current) {
+      if (isPlaying) {
+        videoRef.current.pauseAsync();
+      } else {
+        videoRef.current.playAsync();
+      }
+      setIsPlaying(!isPlaying);
+    }
+  };
 
-    const { status } = await MediaLibrary.requestPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Không có quyền lưu video');
+  const handlePlaybackStatusUpdate = (status) => {
+    if (status.isLoaded) {
+      setVideoProgress(status.positionMillis);
+      setVideoDuration(status.durationMillis);
+      setIsPlaying(status.isPlaying);
+    }
+    if (status.didJustFinish) {
+      setIsPlaying(false);
+      setVideoProgress(0); // Reset về đầu khi kết thúc
+      videoRef.current.replayAsync(); // Tùy chọn: tự động phát lại
+    }
+  };
+
+  const handleSeek = async (value) => {
+    if (videoRef.current) {
+      await videoRef.current.setPositionAsync(value);
+      setVideoProgress(value);
+    }
+  };
+
+  const saveVideoToDevice = async () => {
+    if (!videoUrl) {
+      Alert.alert('Lỗi', 'Không có video để lưu.');
       return;
     }
 
-    const asset = await MediaLibrary.createAssetAsync(videoUri);
-    await MediaLibrary.createAlbumAsync('Videos', asset, false);
-    Alert.alert('Đã lưu video vào thư viện!');
+    if (Platform.OS === 'web') {
+      Alert.alert('Thông báo', 'Tính năng lưu video về thiết bị không khả dụng trên nền web.');
+      return;
+    }
+
+    const { status } = await MediaLibrary.requestPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Cần quyền truy cập', 'Ứng dụng cần quyền truy cập vào thư viện ảnh để lưu video.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const fileUri = FileSystem.documentDirectory + `video_${Date.now()}.mp4`;
+      const { uri: downloadedUri } = await FileSystem.downloadAsync(videoUrl, fileUri);
+
+      const asset = await MediaLibrary.createAssetAsync(downloadedUri);
+      if (asset) {
+        Alert.alert('Thành công', 'Video đã được lưu vào thư viện!');
+      } else {
+        Alert.alert('Lỗi', 'Không thể lưu video vào thư viện.');
+      }
+    } catch (error) {
+      console.error('Lỗi khi lưu video:', error);
+      Alert.alert('Lỗi', `Đã xảy ra lỗi khi lưu video: ${error.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const formatTime = (millis) => {
+    const totalSeconds = Math.floor(millis / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
   };
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <TouchableOpacity style={styles.button} onPress={pickImages}>
-        <Text style={styles.buttonText}>📸 CHỌN ẢNH</Text>
+      <Text style={styles.title}>Tạo Video từ Ảnh</Text>
+
+      {/* Khung Ảnh/Video lớn */}
+      <View style={styles.mediaFrame}>
+        {loading && <ActivityIndicator size="large" color="#0000ff" />}
+        {videoUrl ? (
+          <Video
+            ref={videoRef}
+            style={styles.videoPlayer}
+            source={{ uri: videoUrl }}
+            useNativeControls={false} // Tắt điều khiển gốc để dùng điều khiển tùy chỉnh
+            resizeMode="contain"
+            isLooping
+            onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
+          />
+        ) : selectedImages.length > 0 ? (
+          <Image source={{ uri: selectedImages[0] }} style={styles.imagePreview} />
+        ) : (
+          <Text style={styles.placeholderText}>Chưa có ảnh/video nào</Text>
+        )}
+      </View>
+
+      {/* Nút Chọn Ảnh */}
+      <TouchableOpacity style={styles.button} onPress={pickImages} disabled={loading}>
+        <Text style={styles.buttonText}>Chọn Ảnh</Text>
       </TouchableOpacity>
 
+      {/* Trường mô tả */}
       <TextInput
-        style={styles.input}
-        placeholder="Nhập mô tả..."
+        style={[styles.descriptionInput, { height: Math.max(35, description.length > 0 ? (description.split('\n').length * 20) : 35) }]} // Tự động mở rộng
+        placeholder="Mô tả nội dung chuyển động của video..."
+        multiline
         value={description}
         onChangeText={setDescription}
+        editable={!loading}
       />
 
-      <TouchableOpacity style={styles.buttonGreen} onPress={createVideo}>
-        <Text style={styles.buttonText}>🎬 TẠO VIDEO</Text>
+      {/* Nút Tạo Video */}
+      <TouchableOpacity style={styles.button} onPress={createVideo} disabled={loading || selectedImages.length === 0}>
+        <Text style={styles.buttonText}>{loading ? 'Đang tạo video...' : 'Tạo Video'}</Text>
       </TouchableOpacity>
 
-      {loading && <ActivityIndicator size="large" color="#0000ff" />}
+      {/* Phần điều khiển video (chỉ hiển thị khi có video) */}
+      {videoUrl && (
+        <View style={styles.videoControlsContainer}>
+          {/* Nút Play/Stop */}
+          <TouchableOpacity style={styles.playPauseButton} onPress={togglePlayPause}>
+            <Text style={styles.playPauseButtonText}>{isPlaying ? '⏸️' : '▶️'}</Text>
+          </TouchableOpacity>
 
-      {images.length > 0 && (
-        <View style={styles.preview}>
-          {images.map((uri, index) => (
-            <Image key={index} source={{ uri }} style={styles.image} />
-          ))}
+          {/* Thanh thời lượng video */}
+          <Slider
+            style={styles.progressSlider}
+            minimumValue={0}
+            maximumValue={videoDuration}
+            value={videoProgress}
+            onSlidingComplete={handleSeek}
+            minimumTrackTintColor="#FF0000" // Màu đỏ giống YouTube
+            maximumTrackTintColor="#FFFFFF"
+            thumbTintColor="#FF0000"
+          />
+          <Text style={styles.timeText}>{`${formatTime(videoProgress)} / ${formatTime(videoDuration)}`}</Text>
         </View>
       )}
 
-      {videoUri !== '' && (
-        <>
-          <Video
-            source={{ uri: videoUri }}
-            rate={1.0}
-            volume={1.0}
-            isMuted={false}
-            resizeMode="contain"
-            shouldPlay
-            useNativeControls
-            style={styles.video}
-          />
-          <Button title="💾 Lưu video vào máy" onPress={saveVideo} />
-        </>
+      {/* Nút Lưu Video */}
+      {videoUrl && (
+        <TouchableOpacity style={styles.saveButton} onPress={saveVideoToDevice} disabled={isSaving}>
+          <Text style={styles.saveButtonText}>{isSaving ? 'Đang lưu...' : 'Lưu Video'}</Text>
+        </TouchableOpacity>
       )}
     </ScrollView>
   );
@@ -149,54 +262,114 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: {
+    flexGrow: 1,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
     padding: 20,
     paddingTop: 50,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    color: '#333',
+  },
+  mediaFrame: {
+    width: VIDEO_FRAME_WIDTH,
+    height: VIDEO_FRAME_HEIGHT,
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
     alignItems: 'center',
+    borderRadius: 10,
+    overflow: 'hidden', // Quan trọng để ảnh/video không tràn ra ngoài
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#ccc',
+  },
+  imagePreview: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'contain',
+  },
+  videoPlayer: {
+    width: '100%',
+    height: '100%',
+  },
+  placeholderText: {
+    color: '#666',
+    fontSize: 16,
   },
   button: {
     backgroundColor: '#007bff',
-    padding: 12,
-    borderRadius: 10,
-    marginVertical: 10,
-    width: '100%',
-  },
-  buttonGreen: {
-    backgroundColor: '#28a745',
-    padding: 12,
-    borderRadius: 10,
-    marginVertical: 10,
-    width: '100%',
+    paddingVertical: 12,
+    paddingHorizontal: 25,
+    borderRadius: 8,
+    marginBottom: 15,
+    width: '95%',
+    alignItems: 'center',
   },
   buttonText: {
-    color: 'white',
+    color: '#fff',
+    fontSize: 18,
     fontWeight: 'bold',
-    textAlign: 'center',
-    fontSize: 16,
   },
-  input: {
+  descriptionInput: {
+    width: '95%',
+    minHeight: 35, // Chiều cao tối thiểu
+    maxHeight: 150, // Chiều cao tối đa, có thể cuộn nếu vượt quá
     borderColor: '#ccc',
     borderWidth: 1,
-    width: '100%',
-    padding: 10,
-    borderRadius: 10,
-    marginVertical: 10,
-    backgroundColor: 'white',
+    borderRadius: 8,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    fontSize: 16,
+    lineHeight: 20, // Khoảng cách dòng cho TextInput multiline
+    marginBottom: 20,
+    backgroundColor: '#fff',
   },
-  preview: {
+  videoControlsContainer: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '95%',
     marginTop: 10,
-  },
-  image: {
-    width: 100,
-    height: 100,
-    margin: 5,
+    marginBottom: 20,
+    backgroundColor: '#333',
+    padding: 10,
     borderRadius: 8,
   },
-  video: {
-    width: '100%',
-    height: 200,
-    marginTop: 20,
+  playPauseButton: {
+    backgroundColor: '#FF0000', // Màu đỏ giống YouTube
+    padding: 10,
+    borderRadius: 5,
+    width: 50,
+    alignItems: 'center',
+  },
+  playPauseButtonText: {
+    fontSize: 24,
+    color: '#fff',
+  },
+  progressSlider: {
+    flex: 1,
+    marginHorizontal: 10,
+  },
+  timeText: {
+    color: '#fff',
+    fontSize: 14,
+  },
+  saveButton: {
+    backgroundColor: '#28a745', // Màu xanh lá cây
+    paddingVertical: 12,
+    paddingHorizontal: 25,
     borderRadius: 8,
+    marginTop: 10,
+    width: '95%',
+    alignItems: 'center',
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
   },
 });
+
